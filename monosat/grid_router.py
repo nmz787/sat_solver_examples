@@ -1,3 +1,10 @@
+"""
+run with:
+python3 grid_router.py <path to .pcrt file> && cat sol_out
+
+example:
+python3 grid_router.py simple90.pcrt && cat sol_out
+"""
 from collections import OrderedDict, defaultdict
 import os
 import sys
@@ -33,13 +40,14 @@ class SATGenerator(object):
         self.create_clauses()
         res = self.solve()
         if(res):
+            #self.parse_solution_old(res)
             self.parse_solution(res)
 
     def setup_output(self):
         #self.m = Monosat()
         self.m = Monosat().init("-route")
         #self.m.setOutputFile('solver_out2')
-        #self.m.init(' '.join([ '-conflict-min-cut', '-theory-order-vsids', '-decide-theories']))
+        #self.m = Monosat().init(' '.join([ '-conflict-min-cut', '-theory-order-vsids', '-decide-theories']))
         #self.m.init('-kt-preserve-order -force-distance')
         #self.m.init(' '.join( ['-verb=1', '-theory-order-vsids', '-vsids-both', '-decide-theories', '-no-decide-graph-rnd', '-lazy-maxflow-decisions', '-conflict-min-cut', '-conflict-min-cut-maxflow', '-reach-underapprox-cnf', '-adaptive-history-clear=5']))
         self.g = Graph()
@@ -180,16 +188,21 @@ class SATGenerator(object):
         # # disallow an input to connect to any other trace's output
         for ios in ios_overall:
             inp = ios[0]
+            outp = ios[1]
             # get all other traces beside this current one
             others = list(ios_overall);
             others.remove(ios)
             # get all other traces' outputs
+            other_inputs = [other_io[0] for other_io in others]
             other_outputs = [other_io[1] for other_io in others]
-            for other_out in other_outputs:
+            for other_out in other_outputs+other_inputs:
                 # self.output.write('reach 0 {} {} {}\n'.format(inp['node'], other_out['node'], _false))
                 rv = self.g.reaches(inp['node'], other_out['node'])
+                rv2 = self.g.reaches(outp['node'], other_out['node'])
                 #self.clause([Not(rv)])
-                AssertNor(rv)
+                #self.clause([Not(rv2)])
+                Assert(Not(rv))
+                Assert(Not(rv2))
 
         # self.output.write('acyclic 0 {}\n'.format(_true))
         Assert(self.g.acyclic())
@@ -257,8 +270,7 @@ class SATGenerator(object):
                 if (ix, iy, iz) != self.edge_vars[n][0]:
                     print('prev {} expected prev {}'.format((ix, iy, iz), self.edge_vars[n][0]))
                 jx,jy,jz = place
-                print('node in journey: {}'.format(self.grid_by_xyz[jx][jy][jz]['node']))
-
+                print('node in journey: {} (x,y,z) ({},{},{})'.format(self.grid_by_xyz[jx][jy][jz]['node'], jx, jy, jz))
             # now that we're done walking the graph, we can make a crude sort-of bitmap
             for z in range(self.maxz):
                 o.write('Z {}\n'.format(z))
@@ -328,10 +340,27 @@ class SATGenerator(object):
                 if (ix, iy, iz) != self.edge_vars[n][0]:
                     print('prev {} expected prev {}'.format((ix, iy, iz), self.edge_vars[n][0]))
                 jx,jy,jz = place
-                print('node in journey: {}'.format(self.grid_by_xyz[jx][jy][jz]['node']))
+                print('node in journey: {} (x,y,z) ({},{},{})'.format(self.grid_by_xyz[jx][jy][jz]['node'], jx, jy, jz))
             trace_journeys[trace] = {'journey': journey, 'start': start, 'end': end}
 
-        
+            # # now that we're done walking the graph, we can make a crude sort-of bitmap
+            # for z in range(self.maxz):
+            #     o.write('Z {}\n'.format(z))
+            #     for x in range(self.maxx):
+            #         for y in range(self.maxy):
+            #             # print a * for start/end points
+            #             if (x, y, z) in [start, end]:
+            #                 o.write('*{} '.format(' ' * (l - 1)))
+            #             # print the trace-name for points in a trace
+            #             elif (x, y, z) in journey:  # self.trace_journeys[trace]['journey']:
+            #                 o.write('{}{} '.format(trace, ' ' * (l - len(trace))))
+            #             # if a space is unused, print a 0
+            #             else:
+            #                 o.write('0{} '.format(' ' * (l - 1)))
+            #         o.write('\n')
+            #     o.write('\n')
+
+
         # now that we're done walking the graph, we can make a crude sort-of bitmap
         for z in range(self.maxz):
             o.write('Z {}\n'.format(z))
@@ -403,10 +432,10 @@ class SATGenerator(object):
         AssertAtMostOne(outgoing_edges)
 
         # TODO why is the next line causing output to be weird?
-        #circumferential_loc_nodes = self._get_circumferential_locs(*center_node['xyz'])
+        circumferential_loc_nodes = self._get_circumferential_locs(*center_node['xyz'])
         #AssertAtMostOne([self._node_edge_to(center_node, n) for n in circumferential_loc_nodes])
         #AssertAtMostOne([edge_came_from] + [self._node_edge_to(n, center_node) for n in circumferential_loc_nodes])
-        #AssertAtMostOne([self._node_edge_to(n, center_node) for n in circumferential_loc_nodes])
+        AssertAtMostOne([self._node_edge_to(n, center_node) for n in circumferential_loc_nodes])
 
         # Assert(Or(Not(v[1]), *es))
 
@@ -467,9 +496,9 @@ class SATGenerator(object):
             assert len(nvs) == ensure, 'nvs was {}'.format(nvs)
         return nvs
 
-x=12
-y=12
-z=1
+x=20
+y=20
+z=3
 test_example = 3
 traces = OrderedDict()
 if test_example == 0:
@@ -484,10 +513,10 @@ if test_example == 0:
                                   'output': (10, 4, 0)})])
 elif test_example == 1:
     # left-to-right, or up-to-down
-    do_y = True
+    do_y = False
     if do_y:
         for iy in range(y):
-            traces['t{}'.format(iy)] = {'input': (0,iy, 0), 'output': (x-1,iy, 0)}
+            traces['y{}'.format(iy)] = {'input': (0,iy, 0), 'output': (x-1,iy, 0)}
     else:
         for ix in range(x):
             the_z = 0
@@ -497,11 +526,38 @@ elif test_example == 1:
 elif test_example == 2:
     starts = []
     ends = []
-    for iy in range(5, y-5, 4):
-        for ix in range(5, x-5, 4):
+    space_between_pins = 4
+    for iy in range(5, y-5, space_between_pins):
+        for ix in range(5, x-5, space_between_pins):
+            print('starting at x {} y {} z {}'.format(ix, iy, 0))
             starts.append((ix, iy, 0))
 
+    perimeter=x*2+y*2
+    spacing=min(int(perimeter/len(starts)), 3)
+    xs = [(xx,y-1) for xx in range(0,x,spacing)] + [(xx,0) for xx in range(x-1,0,-spacing)]
+    print('xs is {}'.format(xs))
+    ys = [(0,yy) for yy in range(0,y,spacing)] + [(yy,x-1) for yy in range(0,y,spacing)]
+    positions = xs #+ ys
+    for n in range(len(starts)):
+        if not positions:
+            raise Exception('no more positions available for the outer edge when trying to spread out the connections')
+        xx,yy = positions.pop()
+        ends.append((xx,yy,0))
+        print('end {}'.format(ends[-1]))
     #for start_i in range(min([x,y])):
+    #    for iy in range(start_i, y, y-start_i):
+    #        for ix in range(start_i, x, x-start_i):
+    #            ends.append((ix, iy, 1))
+    #            print('ending at x {} y {} z {}'.format(ix, iy, 1))
+    if len(ends)!=len(starts):
+        raise Exception('lend of ends!=starts s {} e {}'.format(len(ends), len(starts) ))
+    for i,se in enumerate(zip(starts, ends)):
+        s=se[0]
+        e=se[1]
+        traces['t{}'.format(i)] = {'input': (s[0],s[1],s[2]), 'output': (e[0],e[1],e[2])}
+        print('trace will be {}'.format(traces['t{}'.format(i)]))
+    #import sys; sys.exit(-1)
+
     #while len(ends)<len(starts):
     def get_circumferential_locs(start_i):
         ends = []
@@ -515,7 +571,8 @@ elif test_example == 2:
 
         for iy in range(start_i, y, y-1-start_i):
             for ix in range(start_i, x, y-1-start_i):
-                ends.append((ix, iy, 0))
+                ends.append((ix, iy, 1))
+                print('ending at x {} y {} z {}'.format(ix, iy, 0))
 
             traces['t{}'.format(iy)] = {'input': (0,iy, 0), 'output': (x-1,iy, 0)}
         # for ix in range(x):
