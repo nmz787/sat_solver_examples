@@ -8,13 +8,56 @@ python3 grid_router.py simple90.pcrt && cat sol_out
 from collections import OrderedDict, defaultdict
 import os
 import sys
+import random
 import subprocess
 from copy import deepcopy
 from monosat import *
 from time import time
+try:
+    from python_brlcad_tcl.brlcad_tcl import *
+    output_method = 'brlcad'
+except:
+    output_method = 'ascii'
 # enable using multiple levels of dict keys automatically, even if nested levels don't yet exist
 NestedDict = lambda: defaultdict(NestedDict)
 
+import colorsys
+ 
+def HSVToRGB(h, s, v):
+    (r, g, b) = colorsys.hsv_to_rgb(h, s, v)
+    return (int(255*r), int(255*g), int(255*b))
+ 
+def colors(n):
+    """
+    use the color ring (HSV) to generate visually distinct colors"
+    thanks to Karthik Kumar Viswanathan from: https://www.quora.com/How-do-I-generate-n-visually-distinct-RGB-colours-in-Python
+    """
+    huePartition = 1.0 / (n + 1)
+    return [HSVToRGB(huePartition * value, 1.0, 1.0) for value in range(0, n)]
+
+
+# def colors(n):
+#     max_value = 16581375 #255**3
+#     interval = int(max_value / n)
+#     colors = [hex(I)[2:].zfill(6) for I in range(0, max_value, interval)]
+    
+#     return [(int(i[:2], 16), int(i[2:4], 16), int(i[4:], 16)) for i in colors]
+
+# def colors(n):
+#   ret = []
+#   r = int(random.random() * 256)
+#   g = int(random.random() * 256)
+#   b = int(random.random() * 256)
+#   step = 256 / n
+#   for i in range(n):
+#     r += step
+#     g += step
+#     b += step
+#     r = int(r) % 256
+#     g = int(g) % 256
+#     b = int(b) % 256
+#     ret.append((r,g,b)) 
+#   return ret
 
 class SATGenerator(object):
     def __init__(self, traces, maxx, maxy, maxz):
@@ -359,29 +402,71 @@ class SATGenerator(object):
             #                 o.write('0{} '.format(' ' * (l - 1)))
             #         o.write('\n')
             #     o.write('\n')
+        
+        if output_method == 'brlcad':
+            to_groups = {}
+            colorset = colors(len(self.traces))
+            trace_colors = {trace:colorset[i] for i, trace in enumerate(self.traces)}
+            trace_brl_names = []
+            for trace in self.traces:
+                to_groups[trace] = []
+                # trace_colors[trace] = (
+                #     int(255*random.random()),
+                #     int(255*random.random()),
+                #     int(255*random.random())
+                #     )
+            with brlcad_tcl('sol_out_brl', "My Database", make_g=True, verbose=False, units='mm') as brl_db:
+                block_size = 10
 
-
-        # now that we're done walking the graph, we can make a crude sort-of bitmap
-        for z in range(self.maxz):
-            o.write('Z {}\n'.format(z))
-            for y in range(self.maxy):
-                for x in range(self.maxx):
-                    found_net = False
-                    for trace in self.traces:
-                        # print a * for start/end points
-                        if (x, y, z) in [trace_journeys[trace]['start'], trace_journeys[trace]['end']]:
-                            o.write('*{} '.format(' ' * (l - 1)))
-                            found_net = True
-                            break
-                        # print the trace-name for points in a trace
-                        elif (x, y, z) in trace_journeys[trace]['journey']:
-                            o.write('{}{} '.format(trace, ' ' * (l - len(trace))))
-                            found_net = True
-                            break
-                        # if a space is unused, print a 0
-                    if not found_net:
-                        o.write('0{} '.format(' ' * (l - 1)))
-                o.write('\n')
+                for z in range(self.maxz):
+                    for y in range(self.maxy):
+                        for x in range(self.maxx):
+                            for trace in self.traces:
+                                # print a * for start/end points
+                                p1=(x,y,z)
+                                p2=(x+1,y+1,z+1)
+                                #if (x, y, z) in [trace_journeys[trace]['start'], trace_journeys[trace]['end']]:
+                                if (x, y, z) in [trace_journeys[trace]['start'], trace_journeys[trace]['end']]+trace_journeys[trace]['journey']:
+                                    #o.write('*{} '.format(' ' * (l - 1)))
+                                    #to_groups[trace].append(brl_db.cuboid(p1, p2))
+                                # print the trace-name for points in a trace
+                                #elif (x, y, z) in trace_journeys[trace]['journey']:
+                                    to_groups[trace].append(brl_db.cuboid(p1, p2))
+                                    # r,g,b = trace_colors[trace]
+                                    # brl_db.set_material_color(to_groups[trace][-1], r,g,b, 'plastic')
+                                    #o.write('{}{} '.format(trace, ' ' * (l - len(trace))))
+                for trace in self.traces:
+                    trace_name = brl_db.group(join_as_str(' ', to_groups[trace]))
+                    trace_brl_names.append(trace_name)
+                    r,g,b = trace_colors[trace]
+                    brl_db.set_material_color(trace_name, r,g,b, 'plastic')
+                    
+            for brl_trace in trace_brl_names:
+                brl_db.save_stl(brl_trace, str(brl_trace))
+                # minp = (min(p1[0], p2[0]), min(p1[1], p2[1]), 0)
+                # maxp = (max(p1[0], p2[0]), max(p1[1], p2[1]), fin_h)
+        elif output_method == 'ascii':
+            # now that we're done walking the graph, we can make a crude sort-of bitmap
+            for z in range(self.maxz):
+                o.write('Z {}\n'.format(z))
+                for y in range(self.maxy):
+                    for x in range(self.maxx):
+                        found_net = False
+                        for trace in self.traces:
+                            # print a * for start/end points
+                            if (x, y, z) in [trace_journeys[trace]['start'], trace_journeys[trace]['end']]:
+                                o.write('*{} '.format(' ' * (l - 1)))
+                                found_net = True
+                                break
+                            # print the trace-name for points in a trace
+                            elif (x, y, z) in trace_journeys[trace]['journey']:
+                                o.write('{}{} '.format(trace, ' ' * (l - len(trace))))
+                                found_net = True
+                                break
+                            # if a space is unused, print a 0
+                        if not found_net:
+                            o.write('0{} '.format(' ' * (l - 1)))
+                    o.write('\n')
         o.close()
 
     def var(self, name):
